@@ -12,8 +12,6 @@ section .text
     global close_file  
     global read_file
     global print_string
-    global kairos_malloc
-    global kairos_free
     global string_length
     global string_compare
     global cleanup_all
@@ -21,6 +19,7 @@ section .text
     extern printf
     extern malloc
     extern free
+    extern garbage_collect
 
 ; Wrapper functions for compatibility
 open_file:
@@ -43,37 +42,6 @@ print_string:
     
     ; RCX already contains the string pointer
     call printf
-    
-    add rsp, 32
-    mov rsp, rbp
-    pop rbp
-    ret
-
-kairos_malloc:
-    ; Wrapper for C malloc (64-bit Windows calling convention)
-    ; RCX = size to allocate
-    ; Returns pointer in RAX
-    push rbp
-    mov rbp, rsp
-    sub rsp, 32         ; Shadow space
-    
-    ; RCX already contains the size
-    call malloc
-    
-    add rsp, 32
-    mov rsp, rbp
-    pop rbp
-    ret
-
-kairos_free:
-    ; Wrapper for C free (64-bit Windows calling convention)
-    ; RCX = pointer to free
-    push rbp
-    mov rbp, rsp
-    sub rsp, 32         ; Shadow space
-    
-    ; RCX already contains the pointer
-    call free
     
     add rsp, 32
     mov rsp, rbp
@@ -139,4 +107,6 @@ string_compare:
 
 cleanup_all:
     ; Cleanup all allocated resources
+    ; Call heap cleanup if available
+    call garbage_collect
     ret

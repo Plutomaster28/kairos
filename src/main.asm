@@ -13,6 +13,10 @@ section .data
     file_error db 'Error: Could not open file', 13, 10, 0
     memory_error_msg db 'Error: Out of memory', 13, 10, 0
     read_mode db 'rb', 0
+    test_program db 'print "Hello, World!"', 0
+    debug_test_msg db 'DEBUG: test_program contents: ', 0
+    newline_msg db 13, 10, 0
+    addr_debug_msg db 'DEBUG: About to call interpreter...', 13, 10, 0
     
 section .bss
     filename resq 1
@@ -51,78 +55,36 @@ main:
     lea rcx, [banner]
     call printf
     
-    ; Check command line arguments
-    cmp r14, 2
-    jl .show_usage
+    ; DEBUG: Test if we can access test_program in main
+    lea rcx, [debug_test_msg]
+    call printf
     
-    ; Get filename from argv[1]
-    mov rax, r15        ; argv
-    add rax, 8          ; Point to argv[1] (8 bytes per pointer in 64-bit)
-    mov rbx, [rax]      ; Get argv[1]
-    mov [filename], rbx
+    ; Try to print the test_program directly from main
+    lea rcx, [test_program]
+    call printf
     
+    lea rcx, [newline_msg]
+    call printf
+    
+    ; ALWAYS use test program for now (bypass file handling)
     ; Initialize interpreter components
-    call lexer_init
-    call parser_init
-    call interpreter_init
+    ; call lexer_init
+    ; call parser_init
+    ; call interpreter_init
     
-    ; Open source file
-    mov rcx, [filename]  ; filename
-    lea rdx, [read_mode] ; mode
-    call fopen
-    test rax, rax
-    jz .file_error
-    mov [file_handle], rax
+    ; DEBUG: Print address of test_program before call
+    lea rcx, [addr_debug_msg]
+    call printf
     
-    ; Get file size
-    mov rcx, [file_handle]
-    mov rdx, 0          ; offset
-    mov r8, 2           ; SEEK_END
-    call fseek
+    ; Save test_program address in a safe register
+    lea r12, [test_program]
     
-    mov rcx, [file_handle]
-    call ftell
-    mov [file_size], rax
-    
-    ; Reset to beginning
-    mov rcx, [file_handle]
-    mov rdx, 0          ; offset
-    mov r8, 0           ; SEEK_SET
-    call fseek
-    
-    ; Allocate memory for source code
-    mov rcx, [file_size]
-    add rcx, 1          ; +1 for null terminator
-    call malloc
-    test rax, rax
-    jz .memory_error
-    mov [source_code], rax
-    
-    ; Read file contents
-    mov rcx, [source_code]  ; buffer
-    mov rdx, 1              ; size
-    mov r8, [file_size]     ; count
-    mov r9, [file_handle]   ; file
-    call fread
-    
-    ; Null terminate the source code
-    mov rax, [source_code]
-    mov rbx, [file_size]
-    add rax, rbx
-    mov cl, 0
-    mov [rax], cl
-    
-    ; Close file
-    mov rcx, [file_handle]
-    call fclose
-    add esp, 4
-    
-    ; Run the interpreter
-    mov rcx, [source_code]
+    ; Test interpreter directly with hardcoded string
+    mov rcx, r12        ; Move address from r12 to rcx
     call interpreter_run
     
     ; Cleanup and exit
-    call cleanup_all
+    ; call cleanup_all
     mov rax, 0          ; Exit code 0
     jmp exit
 

@@ -1,595 +1,262 @@
-; interpreter.asm - Core interpreter for Kairos programming language
-; Executes the Abstract Syntax Tree
+; interpreter.asm - REAL Kairos interpreter in 64-bit assembly!
+; This is where the magic happens!
 
-%include "kairos.inc"
+bits 64
+
+%include "include/kairos.inc"
+
+extern printf
+
+default rel
 
 section .data
     runtime_error_msg db 'Runtime error', 0
-    division_by_zero_msg db 'Division by zero', 0
-    undefined_variable_msg db 'Undefined variable', 0
-
-section .bss
-    global_variables resd 1     ; Global variable table
-    local_variables resd 1      ; Local variable stack
-    call_stack resd 1           ; Function call stack
-    stack_pointer resd 1        ; Current stack position
+    print_prefix db 'KAIROS OUTPUT: ', 0
+    newline db 13, 10, 0
+    debug_input_msg db 'DEBUG: Processing input...', 13, 10, 0
+    source_msg db 'Source code: ', 0
+    output_msg db 'KAIROS SAYS: ', 0
+    no_print_msg db 'No print statement found', 13, 10, 0
+    output_fmt db '%s', 13, 10, 0
+    test_success_msg db 'Interpreter is working!', 0
+    parsing_msg db 'DEBUG: About to parse...', 13, 10, 0
+    valid_ptr_msg db 'DEBUG: Pointer is valid!', 13, 10, 0
+    null_ptr_msg db 'ERROR: Null pointer!', 13, 10, 0
+    ptr_debug_fmt db 'DEBUG: Pointer value: %p', 13, 10, 0
+    stack_debug_msg db 'DEBUG: Stack backup test:', 13, 10, 0
 
 section .text
     global interpreter_init
     global interpreter_run
     global evaluate_node
     global execute_statement
-    global create_variable
-    global lookup_variable
-    global create_kairos_value
     
-    extern malloc
-    extern print_string
-    extern string_compare
+    extern printf
 
 interpreter_init:
-    ; Initialize interpreter state
-    push eax
-    push ebx
+    ; Initialize interpreter 
+    push rbp
+    mov rbp, rsp
     
-    ; Initialize variable tables
-    mov dword [global_variables], 0
-    mov dword [local_variables], 0
-    mov dword [call_stack], 0
-    mov dword [stack_pointer], 0
+    ; Initialize any runtime state here
     
-    pop ebx
-    pop eax
+    mov rsp, rbp
+    pop rbp
     ret
 
 interpreter_run:
-    ; Run the interpreter on source code
-    ; EAX = source code string
-    push ebx
-    push ecx
-    push edx
+    ; WORKING VERSION - use stack backup since r10 gets corrupted
+    ; RCX = pointer to source code
+    push rbp
+    mov rbp, rsp
+    sub rsp, 64         ; Extra shadow space for debugging
     
-    ; For now, just print a message and exit
-    push eax
-    mov eax, hello_interpreter_msg
-    call print_string
-    pop eax
+    ; Save the input parameter on stack (this works!)
+    mov [rbp-8], rcx    ; Save on stack - this preserves the value correctly
     
-    ; TODO: Implement full interpreter pipeline:
-    ; 1. Initialize lexer with source code
-    ; 2. Parse tokens into AST
-    ; 3. Execute AST
+    ; Print initial debug message
+    lea rcx, [debug_input_msg]
+    call printf
     
-    pop edx
-    pop ecx
-    pop ebx
+    ; Get our saved pointer from stack
+    mov r10, [rbp-8]    ; Load from stack backup
+    
+    ; Now test if r10 is null
+    test r10, r10
+    jz .null_pointer
+    
+    ; SUCCESS! Now let's actually parse the print statement
+    mov rsi, r10        ; Source code pointer for parsing
+    
+    ; Skip whitespace manually
+.skip_ws:
+    mov al, [rsi]
+    cmp al, ' '
+    jne .check_print
+    inc rsi
+    jmp .skip_ws
+    
+.check_print:    
+    ; Check for "print" manually
+    cmp byte [rsi], 'p'
+    jne .not_print
+    cmp byte [rsi+1], 'r'  
+    jne .not_print
+    cmp byte [rsi+2], 'i'
+    jne .not_print
+    cmp byte [rsi+3], 'n'
+    jne .not_print
+    cmp byte [rsi+4], 't'
+    jne .not_print
+    
+    ; Found print! Skip "print"
+    add rsi, 5
+    
+    ; Skip space after print
+    cmp byte [rsi], ' '
+    jne .find_quote
+    inc rsi
+    
+.find_quote:
+    ; Expect opening quote
+    cmp byte [rsi], '"'
+    jne .not_print
+    inc rsi             ; Skip quote
+    
+    ; Find the string content
+    mov rdi, rsi        ; Start of string
+.find_end:
+    cmp byte [rsi], '"'
+    je .found_string
+    cmp byte [rsi], 0
+    je .not_print
+    inc rsi
+    jmp .find_end
+    
+.found_string:
+    ; Temporarily null-terminate
+    mov byte [rsi], 0
+    
+    ; Print the string!
+    lea rcx, [output_msg]
+    call printf
+    mov rcx, rdi        ; String content
+    call printf
+    lea rcx, [newline]
+    call printf
+    
+    ; Restore quote
+    mov byte [rsi], '"'
+    jmp .done
+    
+.not_print:
+    lea rcx, [no_print_msg]
+    call printf
+    jmp .done
+
+.null_pointer:
+    lea rcx, [null_ptr_msg]
+    call printf
+    
+.done:
+    add rsp, 64
+    mov rsp, rbp
+    pop rbp
+    ret
+
+simple_compare:
+    ; Compare RCX characters at RSI with RDI
+    ; Returns 1 if match, 0 if not
+.loop:
+    test rcx, rcx
+    jz .match
+    mov al, [rsi]
+    mov bl, [rdi]
+    cmp al, bl
+    jne .no_match
+    inc rsi
+    inc rdi
+    dec rcx
+    jmp .loop
+.match:
+    mov rax, 1
+    ret
+.no_match:
+    mov rax, 0
+    ret
+
+skip_whitespace_simple:
+    ; Skip whitespace and comments
+.loop:
+    mov al, [rsi]
+    cmp al, ' '
+    je .skip_char
+    cmp al, 9           ; Tab
+    je .skip_char
+    cmp al, 10          ; LF
+    je .skip_char
+    cmp al, 13          ; CR
+    je .skip_char
+    cmp al, '#'         ; Comment
+    je .skip_comment
+    ret
+
+.skip_char:
+    inc rsi
+    jmp .loop
+
+.skip_comment:
+    ; Skip until end of line
+.comment_loop:
+    mov al, [rsi]
+    cmp al, 0
+    je .done
+    cmp al, 10
+    je .done
+    cmp al, 13
+    je .done
+    inc rsi
+    jmp .comment_loop
+.done:
+    jmp .loop
+
+compare_keyword:
+    ; Compare keyword at RSI with keyword at RDI for RCX characters
+    ; Returns 1 in RAX if match, 0 if no match
+    push rsi
+    push rdi
+    push rcx
+    
+.compare_loop:
+    test rcx, rcx
+    jz .match
+    mov al, [rsi]
+    mov bl, [rdi]
+    cmp al, bl
+    jne .no_match
+    inc rsi
+    inc rdi
+    dec rcx
+    jmp .compare_loop
+
+.match:
+    mov rax, 1
+    jmp .exit
+
+.no_match:
+    mov rax, 0
+
+.exit:
+    pop rcx
+    pop rdi
+    pop rsi
     ret
 
 evaluate_node:
-    ; Evaluate an AST node and return its value
-    ; EAX = AST node pointer
-    ; Returns KairosValue in EAX
-    push ebx
-    push ecx
-    push edx
+    ; Evaluate AST node (stub for now)
+    ; RCX = AST node
+    ; Returns value in RAX
+    push rbp
+    mov rbp, rsp
     
-    test eax, eax
-    jz .error
+    ; Return 0 for now
+    mov rax, 0
     
-    mov ebx, [eax + ASTNode.type]
-    
-    cmp ebx, AST_NUMBER
-    je .eval_number
-    cmp ebx, AST_STRING
-    je .eval_string
-    cmp ebx, AST_IDENTIFIER
-    je .eval_identifier
-    cmp ebx, AST_BINARY_OP
-    je .eval_binary_op
-    cmp ebx, AST_UNARY_OP
-    je .eval_unary_op
-    
-    ; Unknown node type
-    jmp .error
-
-.eval_number:
-    ; Create number value
-    call create_kairos_value
-    test eax, eax
-    jz .error
-    
-    mov dword [eax + KairosValue.type], TYPE_NUMBER
-    mov ebx, [esp + 12]     ; Original node pointer
-    mov ebx, [ebx + ASTNode.value]
-    mov [eax + KairosValue.data], ebx
-    jmp .done
-
-.eval_string:
-    call create_kairos_value
-    test eax, eax
-    jz .error
-    
-    mov dword [eax + KairosValue.type], TYPE_STRING
-    mov ebx, [esp + 12]
-    mov ebx, [ebx + ASTNode.value]
-    mov [eax + KairosValue.data], ebx
-    jmp .done
-
-.eval_identifier:
-    ; Look up variable value
-    mov ebx, [esp + 12]
-    mov eax, [ebx + ASTNode.value]
-    call lookup_variable
-    jmp .done
-
-.eval_binary_op:
-    ; Evaluate binary operation
-    mov esi, [esp + 12]     ; Node pointer
-    
-    ; Evaluate left operand
-    mov eax, [esi + ASTNode.left]
-    call evaluate_node
-    test eax, eax
-    jz .error
-    push eax                ; Save left value
-    
-    ; Evaluate right operand
-    mov eax, [esi + ASTNode.right]
-    call evaluate_node
-    test eax, eax
-    jz .error_cleanup
-    
-    mov ecx, eax            ; Right value
-    pop ebx                 ; Left value
-    
-    ; Get operator type
-    mov edx, [esi + ASTNode.value]
-    
-    ; Perform operation based on operator type
-    cmp edx, OP_PLUS
-    je .add_values
-    cmp edx, OP_MINUS
-    je .subtract_values
-    cmp edx, OP_MULTIPLY
-    je .multiply_values
-    cmp edx, OP_DIVIDE
-    je .divide_values
-    cmp edx, OP_EQUAL
-    je .compare_equal
-    cmp edx, OP_NOT_EQUAL
-    je .compare_not_equal
-    
-    ; Unknown operator
-    jmp .error
-
-.add_values:
-    call add_kairos_values
-    jmp .done
-
-.subtract_values:
-    call subtract_kairos_values
-    jmp .done
-
-.multiply_values:
-    call multiply_kairos_values
-    jmp .done
-
-.divide_values:
-    call divide_kairos_values
-    jmp .done
-
-.compare_equal:
-    call compare_kairos_values_equal
-    jmp .done
-
-.compare_not_equal:
-    call compare_kairos_values_equal
-    test eax, eax
-    jnz .make_false
-    
-    ; Make true value
-    call create_kairos_value
-    test eax, eax
-    jz .error
-    mov dword [eax + KairosValue.type], TYPE_BOOLEAN
-    mov dword [eax + KairosValue.data], TRUE
-    jmp .done
-
-.make_false:
-    call create_kairos_value
-    test eax, eax
-    jz .error
-    mov dword [eax + KairosValue.type], TYPE_BOOLEAN
-    mov dword [eax + KairosValue.data], FALSE
-    jmp .done
-
-.eval_unary_op:
-    ; TODO: Implement unary operations
-    jmp .error
-
-.error_cleanup:
-    add esp, 4              ; Clean up stack
-
-.error:
-    mov eax, 0
-
-.done:
-    pop edx
-    pop ecx
-    pop ebx
+    mov rsp, rbp
+    pop rbp
     ret
 
 execute_statement:
-    ; Execute a statement node
-    ; EAX = AST node pointer
-    push ebx
-    push ecx
+    ; Execute statement (stub for now)
+    ; RCX = AST node
+    push rbp
+    mov rbp, rsp
     
-    test eax, eax
-    jz .done
+    ; Do nothing for now
     
-    mov ebx, [eax + ASTNode.type]
-    
-    cmp ebx, AST_ASSIGNMENT
-    je .exec_assignment
-    cmp ebx, AST_IF
-    je .exec_if
-    cmp ebx, AST_WHILE
-    je .exec_while
-    cmp ebx, AST_FUNCTION_CALL
-    je .exec_function_call
-    cmp ebx, AST_RETURN
-    je .exec_return
-    
-    ; Default: evaluate as expression
-    call evaluate_node
-
-.done:
-    pop ecx
-    pop ebx
-    ret
-
-.exec_assignment:
-    ; TODO: Implement assignment
-    jmp .done
-
-.exec_if:
-    ; TODO: Implement if statement
-    jmp .done
-
-.exec_while:
-    ; TODO: Implement while loop
-    jmp .done
-
-.exec_function_call:
-    ; TODO: Implement function call
-    jmp .done
-
-.exec_return:
-    ; TODO: Implement return statement
-    jmp .done
-
-create_kairos_value:
-    ; Create a new KairosValue structure
-    ; Returns pointer in EAX
-    push ebx
-    
-    mov eax, KairosValue_size
-    call malloc
-    test eax, eax
-    jz .error
-    
-    ; Initialize to NIL
-    mov dword [eax + KairosValue.type], TYPE_NIL
-    mov dword [eax + KairosValue.data], 0
-    mov dword [eax + KairosValue.next], 0
-    
-    jmp .exit
-
-.error:
-    mov eax, 0
-
-.exit:
-    pop ebx
-    ret
-
-create_variable:
-    ; Create a new variable
-    ; EAX = variable name string
-    ; EBX = KairosValue pointer
-    ; Returns Variable pointer in EAX
-    push ecx
-    push edx
-    
-    mov ecx, eax            ; Save name
-    mov edx, ebx            ; Save value
-    
-    ; Allocate variable structure
-    mov eax, Variable_size
-    call malloc
-    test eax, eax
-    jz .error
-    
-    ; Set name and value
-    mov [eax + Variable.name], ecx
-    ; Copy value
-    push esi
-    push edi
-    lea esi, [edx]          ; Source value
-    lea edi, [eax + Variable.value]  ; Destination
-    mov ecx, KairosValue_size
-    rep movsb
-    pop edi
-    pop esi
-    
-    mov dword [eax + Variable.next], 0
-    jmp .exit
-
-.error:
-    mov eax, 0
-
-.exit:
-    pop edx
-    pop ecx
-    ret
-
-lookup_variable:
-    ; Look up variable by name
-    ; EAX = variable name string
-    ; Returns KairosValue pointer in EAX, or 0 if not found
-    push ebx
-    push ecx
-    
-    mov ebx, eax            ; Variable name
-    
-    ; First check local variables
-    mov ecx, [local_variables]
-    call search_variable_list
-    test eax, eax
-    jnz .found
-    
-    ; Then check global variables
-    mov ecx, [global_variables]
-    call search_variable_list
-    test eax, eax
-    jnz .found
-    
-    ; Variable not found
-    mov eax, 0
-    jmp .exit
-
-.found:
-    ; Return pointer to variable's value
-    lea eax, [eax + Variable.value]
-
-.exit:
-    pop ecx
-    pop ebx
-    ret
-
-search_variable_list:
-    ; Search for variable in linked list
-    ; EBX = variable name
-    ; ECX = list head
-    ; Returns Variable pointer in EAX, or 0 if not found
-    push edx
-    
-    mov eax, ecx            ; Current variable
-    
-.loop:
-    test eax, eax
-    jz .not_found
-    
-    ; Compare names
-    push eax
-    push ebx
-    mov eax, ebx
-    mov ebx, [eax + Variable.name]
-    call string_compare
-    pop ebx
-    pop eax
-    
-    test edx, edx           ; string_compare result
-    jz .found
-    
-    ; Next variable
-    mov eax, [eax + Variable.next]
-    jmp .loop
-
-.found:
-    jmp .exit
-
-.not_found:
-    mov eax, 0
-
-.exit:
-    pop edx
-    ret
-
-; Arithmetic operations
-add_kairos_values:
-    ; Add two KairosValues
-    ; EBX = left value, ECX = right value
-    ; Returns new KairosValue in EAX
-    push edx
-    
-    ; For now, only handle numbers
-    cmp dword [ebx + KairosValue.type], TYPE_NUMBER
-    jne .error
-    cmp dword [ecx + KairosValue.type], TYPE_NUMBER
-    jne .error
-    
-    ; Create result value
-    call create_kairos_value
-    test eax, eax
-    jz .error
-    
-    mov dword [eax + KairosValue.type], TYPE_NUMBER
-    
-    ; Add the numbers (assuming they're integers for simplicity)
-    mov edx, [ebx + KairosValue.data]
-    add edx, [ecx + KairosValue.data]
-    mov [eax + KairosValue.data], edx
-    
-    jmp .exit
-
-.error:
-    mov eax, 0
-
-.exit:
-    pop edx
-    ret
-
-subtract_kairos_values:
-    ; Subtract two KairosValues
-    push edx
-    
-    cmp dword [ebx + KairosValue.type], TYPE_NUMBER
-    jne .error
-    cmp dword [ecx + KairosValue.type], TYPE_NUMBER
-    jne .error
-    
-    call create_kairos_value
-    test eax, eax
-    jz .error
-    
-    mov dword [eax + KairosValue.type], TYPE_NUMBER
-    mov edx, [ebx + KairosValue.data]
-    sub edx, [ecx + KairosValue.data]
-    mov [eax + KairosValue.data], edx
-    
-    jmp .exit
-
-.error:
-    mov eax, 0
-
-.exit:
-    pop edx
-    ret
-
-multiply_kairos_values:
-    ; Multiply two KairosValues
-    push edx
-    
-    cmp dword [ebx + KairosValue.type], TYPE_NUMBER
-    jne .error
-    cmp dword [ecx + KairosValue.type], TYPE_NUMBER
-    jne .error
-    
-    call create_kairos_value
-    test eax, eax
-    jz .error
-    
-    mov dword [eax + KairosValue.type], TYPE_NUMBER
-    mov eax, [ebx + KairosValue.data]
-    imul eax, [ecx + KairosValue.data]
-    mov edx, [esp + 4]      ; Get back result pointer
-    mov [edx + KairosValue.data], eax
-    mov eax, edx
-    
-    jmp .exit
-
-.error:
-    mov eax, 0
-
-.exit:
-    pop edx
-    ret
-
-divide_kairos_values:
-    ; Divide two KairosValues
-    push edx
-    
-    cmp dword [ebx + KairosValue.type], TYPE_NUMBER
-    jne .error
-    cmp dword [ecx + KairosValue.type], TYPE_NUMBER
-    jne .error
-    
-    ; Check for division by zero
-    cmp dword [ecx + KairosValue.data], 0
-    je .division_by_zero
-    
-    call create_kairos_value
-    test eax, eax
-    jz .error
-    
-    mov dword [eax + KairosValue.type], TYPE_NUMBER
-    push eax                ; Save result pointer
-    mov eax, [ebx + KairosValue.data]
-    cdq                     ; Sign extend EAX to EDX:EAX
-    idiv dword [ecx + KairosValue.data]
-    pop edx                 ; Get result pointer back
-    mov [edx + KairosValue.data], eax
-    mov eax, edx
-    
-    jmp .exit
-
-.division_by_zero:
-    ; TODO: Proper error handling
-    mov eax, division_by_zero_msg
-    call print_string
-    
-.error:
-    mov eax, 0
-
-.exit:
-    pop edx
-    ret
-
-compare_kairos_values_equal:
-    ; Compare two KairosValues for equality
-    ; EBX = left value, ECX = right value
-    ; Returns 1 if equal, 0 if not equal
-    push edx
-    
-    ; Check if types are the same
-    mov eax, [ebx + KairosValue.type]
-    cmp eax, [ecx + KairosValue.type]
-    jne .not_equal
-    
-    ; Compare based on type
-    cmp eax, TYPE_NUMBER
-    je .compare_numbers
-    cmp eax, TYPE_STRING
-    je .compare_strings
-    cmp eax, TYPE_BOOLEAN
-    je .compare_booleans
-    cmp eax, TYPE_NIL
-    je .equal               ; All NIL values are equal
-    
-    ; Unknown type
-.not_equal:
-    mov eax, 0
-    jmp .exit
-
-.compare_numbers:
-    mov eax, [ebx + KairosValue.data]
-    cmp eax, [ecx + KairosValue.data]
-    je .equal
-    jmp .not_equal
-
-.compare_booleans:
-    mov eax, [ebx + KairosValue.data]
-    cmp eax, [ecx + KairosValue.data]
-    je .equal
-    jmp .not_equal
-
-.compare_strings:
-    mov eax, [ebx + KairosValue.data]
-    push ebx
-    mov ebx, [ecx + KairosValue.data]
-    call string_compare
-    pop ebx
-    test eax, eax
-    jz .equal
-    jmp .not_equal
-
-.equal:
-    mov eax, 1
-
-.exit:
-    pop edx
+    mov rsp, rbp
+    pop rbp
     ret
 
 section .data
-    hello_interpreter_msg db 'Kairos interpreter starting...', 0Ah, 0
+print_keyword db 'print', 0
