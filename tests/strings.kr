@@ -1,0 +1,14 @@
+# Test string operations
+local greeting = "Hello"
+local name = "World"
+local message = greeting + ", " + name + "!"
+print message
+
+# Test string comparison
+if greeting == "Hello"
+    print "Greeting is correct"
+end
+
+# Test string functions (when implemented)
+# print "Length of greeting: " + len(greeting)
+# print "Uppercase: " + upper(greeting)

@@ -1,0 +1,29 @@
+# Hello World in Kairos
+print "Hello, World!"
+
+# Variables and arithmetic
+local x = 42
+local y = 13
+local result = x + y
+print "The answer is: " + result
+
+# Simple function
+function greet(name)
+    print "Hello, " + name + "!"
+end
+
+greet("Kairos")
+
+# Conditional logic
+if result > 50
+    print "Result is greater than 50"
+else
+    print "Result is 50 or less"
+end
+
+# Simple loop
+local i = 1
+while i <= 5
+    print "Count: " + i
+    i = i + 1
+end

@@ -1,0 +1,22 @@
+# Test arithmetic operations
+local a = 10
+local b = 3
+
+print "Addition: " + (a + b)
+print "Subtraction: " + (a - b)
+print "Multiplication: " + (a * b)
+print "Division: " + (a / b)
+print "Modulo: " + (a % b)
+
+# Test comparison operators
+print "Equal: " + (a == b)
+print "Not equal: " + (a != b)
+print "Greater than: " + (a > b)
+print "Less than: " + (a < b)
+
+# Test logical operators
+local x = true
+local y = false
+print "AND: " + (x && y)
+print "OR: " + (x || y)
+print "NOT: " + (!x)
